@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatAtomic, parseDecimalAmount, shortAmount, toAtomic } from "@/lib/chain/decimal";
+import {
+  AtomicConversionError,
+  formatAtomic,
+  parseDecimalAmount,
+  shortAmount,
+  toAtomic,
+} from "@/lib/chain/decimal";
 
 const XLM = { decimals: 7, symbol: "XLM" };
 const ETH = { decimals: 18, symbol: "ETH" };
@@ -62,5 +68,37 @@ describe("formatAtomic", () => {
   it("shortAmount is display-only", () => {
     expect(shortAmount("1.23456789", 4)).toBe("1.2345");
     expect(shortAmount("1.000000", 4)).toBe("1");
+  });
+});
+
+describe("toAtomic exact conversion", () => {
+  it("keeps valid string behaviour", () => {
+    expect(toAtomic("1000", 7)).toBe(10_000_000_000n);
+    expect(toAtomic(" 1.5 ", 7)).toBe(15_000_000n);
+    expect(toAtomic("1.123456789", 7)).toBe(11_234_567n);
+    expect(toAtomic("9007199254740993", 7)).toBe(90_071_992_547_409_930_000_000n);
+  });
+
+  it("converts float-boundary numbers exactly", () => {
+    expect(toAtomic(0.1, 18)).toBe(100_000_000_000_000_000n);
+    expect(toAtomic(0.1, 7)).toBe(1_000_000n);
+    expect(toAtomic(1e-7, 7)).toBe(1n);
+    expect(toAtomic(0.3, 18)).toBe(300_000_000_000_000_000n);
+    expect(toAtomic(1.0000001, 7)).toBe(10_000_001n);
+    expect(toAtomic(123456789.1234567, 7)).toBe(1_234_567_891_234_567n);
+    expect(toAtomic(Number.MAX_SAFE_INTEGER, 18)).toBe(9007199254740991n * 10n ** 18n);
+    expect(toAtomic(0, 7)).toBe(0n);
+  });
+
+  it("throws instead of silently rounding", () => {
+    expect(() => toAtomic(1e-8, 7)).toThrow(AtomicConversionError);
+    expect(() => toAtomic(0.12345678, 7)).toThrow(AtomicConversionError);
+    expect(() => toAtomic(2 ** 60, 18)).toThrow(AtomicConversionError);
+    expect(() => toAtomic(1e21, 7)).toThrow(AtomicConversionError);
+    expect(() => toAtomic(Number.NaN, 7)).toThrow(AtomicConversionError);
+    expect(() => toAtomic(Number.POSITIVE_INFINITY, 7)).toThrow(AtomicConversionError);
+    expect(() => toAtomic(-1, 7)).toThrow(AtomicConversionError);
+    expect(() => toAtomic("abc", 7)).toThrow(AtomicConversionError);
+    expect(() => toAtomic("1e3", 7)).toThrow(AtomicConversionError);
   });
 });

@@ -77,20 +77,63 @@ export function formatAtomic(
   return negative ? `-${text}` : text;
 }
 
-/** Parses a decimal string into atomic units without the user-input checks. */
+/** Thrown by {@link toAtomic} when an amount cannot be converted exactly. */
+export class AtomicConversionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AtomicConversionError";
+  }
+}
+
+/**
+ * Parses a decimal string into atomic units without the user-input checks.
+ *
+ * Strings keep their existing behaviour (excess fraction digits are truncated).
+ * Numbers are converted exactly from their shortest decimal representation;
+ * floats are never multiplied, and a number that cannot be represented exactly
+ * in `decimals` places throws instead of being silently rounded.
+ */
 export function toAtomic(amount: string | number, decimals: number): bigint {
-  const raw = typeof amount === "string" ? amount.trim() : String(amount);
+  const raw = typeof amount === "string" ? amount.trim() : numberToDecimalString(amount);
   const match = DECIMAL_RE.exec(raw);
-  if (!match) return parseDecimalFromFloat(Number(raw), decimals);
+  if (!match) {
+    throw new AtomicConversionError(`Cannot convert ${JSON.stringify(String(amount))} to atomic units.`);
+  }
   const whole = match[1];
-  const fraction = (match[2] ?? "").slice(0, decimals).padEnd(decimals, "0");
+  const fullFraction = match[2] ?? "";
+  if (typeof amount === "number" && fullFraction.replace(/0+$/, "").length > decimals) {
+    throw new AtomicConversionError(
+      `${raw} has more than ${decimals} decimal places and cannot be converted exactly.`
+    );
+  }
+  const fraction = fullFraction.slice(0, decimals).padEnd(decimals, "0");
   return BigInt(whole + fraction);
 }
 
-/** Best-effort conversion for values that arrived as JSON numbers. */
-function parseDecimalFromFloat(value: number, decimals: number): bigint {
-  if (!Number.isFinite(value)) return 0n;
-  return BigInt(Math.round(value * 10 ** decimals));
+/**
+ * Expands a finite, non-negative, safe-range JS number into a plain decimal string
+ * (no exponent) using its shortest round-trip representation.
+ */
+function numberToDecimalString(value: number): string {
+  if (!Number.isFinite(value)) {
+    throw new AtomicConversionError(`Cannot convert ${String(value)} to atomic units.`);
+  }
+  if (value < 0) {
+    throw new AtomicConversionError(`Cannot convert negative amount ${String(value)} to atomic units.`);
+  }
+  if (value > Number.MAX_SAFE_INTEGER) {
+    throw new AtomicConversionError(
+      `${String(value)} exceeds Number.MAX_SAFE_INTEGER; pass large amounts as decimal strings.`
+    );
+  }
+  const text = String(value);
+  const exp = /^(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(text);
+  if (!exp) return text;
+  const digits = exp[1] + (exp[2] ?? "");
+  const point = exp[1].length + Number(exp[3]);
+  if (point <= 0) return `0.${"0".repeat(-point)}${digits}`;
+  if (point >= digits.length) return digits + "0".repeat(point - digits.length);
+  return `${digits.slice(0, point)}.${digits.slice(point)}`;
 }
 
 /** Trims a decimal string for display without changing its value. */
